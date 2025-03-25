@@ -97,6 +97,8 @@ def initialize_mhd( nx = 400, # generic 400x400x400 3d grid from -1 to 1 in all 
     
     ''' 
 
+
+    # Parameter initialization for the shock tube case
     if test_case == 'shock_tube':
         print("Assigning initial values for 1D Brio Wu shock tube")
 
@@ -126,11 +128,20 @@ def initialize_mhd( nx = 400, # generic 400x400x400 3d grid from -1 to 1 in all 
             x_max = 1.0
 
 
+
+    
+    # Error handling if someone tries to create a zero dimensional system
     if nx == 0 and ny == 0 and nz == 0:
         print("Error: number of grid points for nx, ny, nz cannot all be zero")
-        return 0
+        return None
 
    
+    ''' 
+    
+    Create coordinate grid for x, y, and z
+
+    '''
+
     if nx >= 2:
         # define simulation grid with nx points
         # stretch between xmin and xmax
@@ -138,32 +149,38 @@ def initialize_mhd( nx = 400, # generic 400x400x400 3d grid from -1 to 1 in all 
         xcoord = np.linspace(x_min,x_max,nx)
     else: 
         dx = 0
-        xcoord = 0    
+        xcoord = np.array([0.0])  # trivial coordinate    
     
     
     if ny >= 2:
-        # define simulation grid with nx points
-        # stretch between xmin and xmax
+        # define simulation grid with ny points
+        # stretch between ymin and xmax
         dy = (y_max - y_min) / (ny-1)
         ycoord = np.linspace(y_min,y_max,ny)
     else: 
         dy = 0
-        ycoord = 0
+        ycoord = np.array([0.0])
 
     
     if nz >= 2:
-        # define simulation grid with nx points
-        # stretch between xmin and xmax
+        # define simulation grid with nz points
+        # stretch between zmin and zmax
         dz = (z_max - z_min) / (nz-1)
         zcoord = np.linspace(z_min,z_max,nz)
     else: 
         dz = 0
-        zcoord = 0
+        zcoord = np.array([0.0])
+
 
     
 
     # Allocate arrays for conserved variables we are interested in
     # each variable has a nx points
+
+
+    # Create meshgrid so that X, Y, Z have shape (nx, ny, nz)
+    # (even if ny=1 or nz=1, the shapes will be consistent)
+    X, Y, Z = np.meshgrid(xcoord, ycoord, zcoord, indexing='ij')
     
 
     # density
@@ -182,91 +199,46 @@ def initialize_mhd( nx = 400, # generic 400x400x400 3d grid from -1 to 1 in all 
     E = np.zeros((nx,ny,nz))
     
 
+    # If it's the Brio-Wu shock-tube test
     if test_case == 'shock_tube':
-        # Set initial conditions for Brio-Wu shock tube
-        # left (x<0) : q = 1.0, By = 1.0, p=1
-        # right (x>0) : q = 0.124, By = -1.0, p=0.1
+        # Set Bx to a constant everywhere
+        Bx[:] = Bx_const
 
-        Bx[:,:,:] = Bx_const
+        # Mask for points where x < 0
+        left_mask  = (X < 0.0)
+        right_mask = ~left_mask
 
-        # iterate through all points in coordinate grid
-        for i in range(nx):
-            for j in range(ny):
-                for k in range(nz):
-                    x_i = xcoord[i]
-                    
-                    # if on the left, set left bw conditions
-                    if x_i < 0.0:
-                        rho[i,j,k] = 1.0
-                        
-                        vx[i,j,k] = 0
-                        vy[i,j,k] = 0
-                        vz[i,j,k] = 0
-                        
-                        By[i,j,k] = 1.0
-                        Bz[i,j,k] = 0
-                        
-                        p = 1.0
-                    
-                
-                    # Else, if on the right, set right bw conditions   
-                    else:
-                        rho[i,j,k] = 0.125
-                        
-                        vx[i,j,k] = 0
-                        vy[i,j,k] = 0
-                        vz[i,j,k] = 0
-                        
-                        By[i,j,k] = -1.0
-                        Bz[i,j,k] = 0
-                        
-                        p = 0.1
-                    
-                    B_sq = Bx[i,j,k]**2 + By[i,j,k]**2 + Bz[i,j,k]**2
-                    v_sq = vx[i,j,k]**2 + vy[i,j,k]**2 + vz[i,j,k]**2        # squared velocity magnitude
-                
-                    # total energy E = internal + kinetic + magnetic
-                    
-                    # internal = p/(gamma-1)
-                    # kinetic = 0.5*rho*(v^2) = 0 (b/c v = 0)
-                    # magnetic = 0.5*(Bx^2 + By^2 + Bz^2)
-                
-                    E[i,j,k] = p / (gamma - 1.0) + (0.5 * rho[i,j,k] * v_sq) + (0.5 * B_sq)
+        # Assign left side
+        rho[left_mask] = 1.0
+        By[left_mask]  = 1.0
+        p_left         = 1.0
 
-        print("Left state initialized as (rho, vx, vy, vz, Bx, By, Bz, p) = [1,0,0,0,0.75,1,0,1]")
-        print("Right state initialized as (rho, vx, vy, vz, Bx, By, Bz, p) = [0.125,0,0,0,0.75,-1,0,0.1]")
-    
-    
-    else:
-        # generic setup for initial conditions. 
+        # Assign right side
+        rho[right_mask] = 0.125
+        By[right_mask]  = -1.0
+        p_right         = 0.1
+
+        # Make a pressure array matching left/right masks
+        p = np.zeros((nx, ny, nz))
+        p[left_mask]  = p_left
+        p[right_mask] = p_right
         
-        # iterate through all points in coordinate grid
-        for i in range(nx):
-            for j in range(ny):
-                for k in range(nz):
-                    
-                    rho[i,j,k] = 0
-                    
-                    vx[i,j,k] = 0
-                    vy[i,j,k] = 0
-                    vz[i,j,k] = 0
-                    
-                    By[i,j,k] = 0
-                    Bz[i,j,k] = 0
-                    Bx[i,j,] = 0
-                    
-                    p = 0
-                    
-                    B_sq = Bx[i,j,k]**2 + By[i,j,k]**2 + Bz[i,j,k]**2
-                    v_sq = vx[i,j,k]**2 + vy[i,j,k]**2 + vz[i,j,k]**2        # squared velocity magnitude
-                
-                    # total energy E = internal + kinetic + magnetic
-                    
-                    # internal = p/(gamma-1)
-                    # kinetic = 0.5*rho*(v^2) = 0 (b/c v = 0)
-                    # magnetic = 0.5*(Bx^2 + By^2 + Bz^2)
-                
-                    E[i,j,k] = p / (gamma - 1.0) + (0.5 * rho[i,j,k] * v_sq) + (0.5 * B_sq)
+        # Compute squared magnitudes
+        B_sq = Bx**2 + By**2 + Bz**2
+        v_sq = vx**2 + vy**2 + vz**2
+        
+        # Total energy: E = p/(gamma - 1) + 0.5 * rho * v^2 + 0.5 * B^2
+        E[:] = p / (gamma - 1.0) + 0.5 * rho * v_sq + 0.5 * B_sq
+        
+        print("Left state initialized as (rho, vx, vy, vz, Bx, By, Bz, p) = "
+              "[1, 0, 0, 0, {:.2f}, 1, 0, 1]".format(Bx_const))
+        print("Right state initialized as (rho, vx, vy, vz, Bx, By, Bz, p) = "
+              "[0.125, 0, 0, 0, {:.2f}, -1, 0, 0.1]".format(Bx_const))
+
+    else:
+        # Generic setup: everything remains zero (as already initialized)
+        # If you'd like something else as a default, you can vectorize similarly.
+        pass
     
     
     # initialize time step variables
